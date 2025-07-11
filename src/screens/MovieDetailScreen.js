@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   Alert,
   StyleSheet
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context"; // ¡Importante: Asegúrate de importar desde 'react-native-safe-area-context'
 import { useRoute, useNavigation } from "@react-navigation/native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import api from "../services/api";
@@ -33,38 +34,60 @@ const MovieDetailScreen = () => {
   const [userComment, setUserComment] = useState(null);
   const [hasUserCommented, setHasUserCommented] = useState(false);
 
+  // useEffect para configurar las opciones del encabezado (botón de regresar)
+  // Este se ejecutará una sola vez al montar el componente.
+  useEffect(() => {
+    navigation.setOptions({
+      headerLeft: () => (
+        <TouchableOpacity onPress={() => navigation.goBack()} style={{ marginLeft: 10 }}>
+          <Text style={{ color: '#fff', fontSize: 18 }}>{'<'}</Text>
+        </TouchableOpacity>
+      ),
+      // Opcional: Si quieres que el título del encabezado sea dinámico basado en la película,
+      // podrías añadirlo aquí. En ese caso, deberías añadir 'movie' como dependencia
+      // y asegurarte de que 'movie' no sea null antes de intentar acceder a 'movie.title'.
+      // headerTitle: movie ? movie.title : 'Detalles de Película',
+    });
+  }, [navigation]); // Depende solo de 'navigation'
+
+  // useEffect para cargar los datos de la película al montar el componente
+  // Este también se ejecutará una sola vez al montar.
   useEffect(() => {
     loadData();
-  }, []);
+  }, []); // El array de dependencias vacío [] significa que se ejecuta una vez
 
   const loadData = async () => {
     setLoading(true);
     const token = await AsyncStorage.getItem("token");
     if (!token) {
       setLoading(false);
+      // Si no hay token, es probable que la sesión haya expirado, redirige al login
+      Alert.alert("Sesión expirada", "Por favor, inicia sesión de nuevo.");
+      navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
       return;
     }
 
     try {
       const [userRes, movieRes] = await Promise.all([
-        api.getUserInfo(token),
+        api.getUserInfo(),
         api.getMovieByTmdbId(tmdbId),
       ]);
 
       setUser(userRes.data);
-      setMovie(movieRes.data);
+      setMovie(movieRes.data); // Asegúrate de que movie se establezca aquí
 
-      await loadUserLists(token);
-      // Solo carga comentarios si hay una película válida
+      await loadUserLists();
+      // Solo carga comentarios si hay una película válida con _id
       if (movieRes.data?._id) {
         await loadComments(movieRes.data._id, userRes.data?._id);
       }
     } catch (err) {
       setError("Error al cargar los datos de la película.");
       console.error("Error en loadData:", err);
-      // Considerar redirigir al login si el token es inválido aquí
+      // Manejo específico para token inválido (error 401)
       if (err.response && err.response.status === 401) {
         await AsyncStorage.clear();
+        Alert.alert("Sesión expirada", "Por favor, inicia sesión de nuevo.");
         navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
       }
     } finally {
@@ -72,19 +95,16 @@ const MovieDetailScreen = () => {
     }
   };
 
-  const loadUserLists = async (token) => {
+  const loadUserLists = async () => {
     try {
       const [wRes, sRes] = await Promise.all([
-        api.getUserWatchlist(token),
-        api.getUserSeenlist(token),
+        api.getUserWatchlist(),
+        api.getUserSeenlist(),
       ]);
       setWatchlist(wRes.data);
       setSeenlist(sRes.data);
-      console.log("loadUserLists: Watchlist cargada:", wRes.data.map(m => m.title));
-      console.log("loadUserLists: Seenlist cargada:", sRes.data.map(m => m.title));
     } catch (err) {
       console.error("Error al cargar listas del usuario:", err);
-      // Manejar errores de token o red
     }
   };
 
@@ -97,11 +117,12 @@ const MovieDetailScreen = () => {
       if (found) {
         setUserComment(found);
         setHasUserCommented(true);
+        // Filtra el propio comentario del usuario para que no aparezca duplicado en "otros comentarios"
         setComments(allComments.filter((c) => c.userId._id !== userId));
       } else {
         setComments(allComments);
         setHasUserCommented(false);
-        setUserComment(null); // Asegúrate de limpiar el comentario del usuario si no hay uno
+        setUserComment(null); // Limpia el comentario del usuario si no hay uno
       }
     } catch (err) {
       console.error("Error al cargar comentarios:", err);
@@ -112,28 +133,24 @@ const MovieDetailScreen = () => {
   const isInSeenlist = () => seenlist.some((m) => m._id === movie?._id);
 
   const submitComment = async () => {
-    const token = await AsyncStorage.getItem("token");
-    if (!token || !movie?._id || !commentText || commentScore === null) {
-        Alert.alert("Error", "Por favor, completa tu comentario y puntaje.");
+    if (!movie?._id || !commentText.trim() || commentScore === null || commentScore === 0) {
+        Alert.alert("Error", "Por favor, escribe un comentario y selecciona un puntaje.");
         return;
     }
 
     try {
-      console.log(`Submit comment: MovieId: ${movie._id}, Content: "${commentText}", Rating: ${commentScore}`);
       await api.createComment(
         {
           movieId: movie._id,
-          content: commentText,
+          content: commentText.trim(), // Asegúrate de quitar espacios en blanco al inicio/final
           rating: commentScore,
-        },
-        token
+        }
       );
-      console.log("Comentario enviado con éxito.");
-
+      Alert.alert("Éxito", "Comentario enviado con éxito.");
       setCommentText("");
       setCommentScore(null);
-      await loadComments(movie._id, user._id);
-      await loadUserLists(token);
+      await loadComments(movie._id, user._id); // Recarga los comentarios para mostrar el nuevo
+      await loadUserLists(); // Recarga las listas (puede ser relevante si hay algún contador o algo)
     } catch (err) {
       Alert.alert("Error", "No se pudo enviar el comentario. " + (err.response?.data?.message || err.message));
       console.error("Error al enviar comentario:", err);
@@ -141,9 +158,8 @@ const MovieDetailScreen = () => {
   };
 
   const toggleWatchlist = async () => {
-    const token = await AsyncStorage.getItem("token");
-    if (!token || !movie?._id) {
-        console.warn("toggleWatchlist: Token o Movie ID no disponibles.");
+    if (!movie?._id) {
+        console.warn("toggleWatchlist: Movie ID no disponible.");
         return;
     }
 
@@ -154,18 +170,13 @@ const MovieDetailScreen = () => {
 
     try {
       if (isInWatchlist()) {
-        console.log(`toggleWatchlist: Eliminando película ID ${movie._id} de watchlist...`);
-        const res = await api.removeFromWatchlist(movie._id, token);
-        console.log("toggleWatchlist: removeFromWatchlist respuesta:", res.data);
-        Alert.alert("Removida de Ver más tarde");
+        await api.removeFromWatchlist(movie._id);
+        Alert.alert("Éxito", "Removida de 'Ver más tarde'.");
       } else {
-        console.log(`toggleWatchlist: Agregando película ID ${movie._id} a watchlist...`);
-        const res = await api.addToWatchlist(movie._id, token);
-        console.log("toggleWatchlist: addToWatchlist respuesta:", res.data);
-        Alert.alert("Agregada a Ver más tarde");
+        await api.addToWatchlist(movie._id);
+        Alert.alert("Éxito", "Agregada a 'Ver más tarde'.");
       }
-      await loadUserLists(token);
-      console.log("toggleWatchlist: Listas de usuario recargadas después de operación.");
+      await loadUserLists(); // Actualiza el estado local de las listas
     } catch (err) {
       Alert.alert("Error", "No se pudo actualizar la lista de 'Ver más tarde'.");
       console.error("Error al actualizar watchlist:", err?.response?.data || err.message);
@@ -173,220 +184,216 @@ const MovieDetailScreen = () => {
   };
 
   const handleAddToSeenlist = async () => {
-    const token = await AsyncStorage.getItem("token");
-    if (!token || !movie?._id) {
-        console.warn("handleAddToSeenlist: Token o Movie ID no disponibles.");
+    if (!movie?._id) {
+        console.warn("handleAddToSeenlist: Movie ID no disponible.");
         return;
     }
 
     try {
       if (isInWatchlist()) {
-        console.log(`handleAddToSeenlist: Eliminando película ID ${movie._id} de watchlist antes de mover a seenlist...`);
-        const res = await api.removeFromWatchlist(movie._id, token);
-        console.log("handleAddToSeenlist: removeFromWatchlist (antes de seenlist) respuesta:", res.data);
+        await api.removeFromWatchlist(movie._id); // Si está en watchlist, la quita antes de añadir a seenlist
       }
       
-      console.log(`handleAddToSeenlist: Agregando película ID ${movie._id} a seenlist...`);
-      const res = await api.addToSeenlist(movie._id, token);
-      console.log("handleAddToSeenlist: addToSeenlist respuesta:", res.data);
-
-      Alert.alert("Éxito", "Película agregada a Mi lista (vistas).");
-      await loadUserLists(token);
-      console.log("handleAddToSeenlist: Listas de usuario recargadas después de operación.");
+      await api.addToSeenlist(movie._id);
+      Alert.alert("Éxito", "Película agregada a 'Mi lista' (vistas).");
+      await loadUserLists(); // Actualiza el estado local de las listas
     } catch (err) {
-      Alert.alert("Error", "No se pudo agregar a Mi lista. " + (err.response?.data?.message || err.message));
-      console.error("Error al agregar a Mi lista (vistas):", err?.response?.data || err.message);
+      Alert.alert("Error", "No se pudo agregar a 'Mi lista'. " + (err.response?.data?.message || err.message));
+      console.error("Error al agregar a 'Mi lista' (vistas):", err?.response?.data || err.message);
     }
   };
 
   return (
-    <ScrollView style={styles.container}>
-      {loading && (
-        <View style={styles.centerSpinner}>
-          <ActivityIndicator size="large" color="#e50914" />
-        </View>
-      )}
-
-      {!loading && error && (
-        <Text style={styles.errorText}>{error}</Text>
-      )}
-
-      {!loading && movie && (
-        <View>
-          <View style={styles.posterContainer}>
-            <Image
-              source={{
-                uri:
-                  movie.posterUrl ||
-                  "https://via.placeholder.com/250x375?text=Sin+imagen",
-              }}
-              style={styles.posterImage}
-            />
+    // <SafeAreaView> debe envolver la vista principal
+    <SafeAreaView style={styles.safeArea}>
+      <ScrollView style={styles.container}>
+        {loading && (
+          <View style={styles.centerSpinner}>
+            <ActivityIndicator size="large" color="#e50914" />
           </View>
+        )}
 
-          <Text style={styles.title}>{movie.title}</Text>
+        {!loading && error && (
+          <Text style={styles.errorText}>{error}</Text>
+        )}
 
-          <Text style={styles.infoText}>
-            <Text style={styles.infoBold}>Fecha de lanzamiento: </Text>
-            {movie.releaseDate}
-          </Text>
+        {!loading && movie && (
+          <View>
+            <View style={styles.posterContainer}>
+              <Image
+                source={{
+                  uri:
+                    movie.posterUrl ||
+                    "https://via.placeholder.com/250x375?text=Sin+imagen",
+                }}
+                style={styles.posterImage}
+                resizeMode="contain"
+              />
+            </View>
 
-          <Text style={styles.infoText}>
-            <Text style={styles.infoBold}>Descripción: </Text>
-            {movie.description}
-          </Text>
+            <Text style={styles.title}>{movie.title}</Text>
 
-          <Text style={styles.infoText}>
-            <Text style={styles.infoBold}>Géneros: </Text>
-            {movie.categories?.join(", ")}
-          </Text>
-
-          <Text style={styles.infoText}>
-            <Text style={styles.infoBold}>Reparto: </Text>
-            {movie.cast?.join(", ")}
-          </Text>
-
-          <View style={styles.row}>
             <Text style={styles.infoText}>
-              <Text style={styles.infoBold}>Usuarios: </Text>
-              {movie.averageUserRating ?? "N/A"}
+              <Text style={styles.infoBold}>Fecha de lanzamiento: </Text>
+              {movie.releaseDate}
             </Text>
-            <Text style={styles.infoText}>
-              <Text style={styles.infoBold}>Críticos: </Text>
-              {movie.averageCriticRating ?? "N/A"}
-            </Text>
-          </View>
 
-          {/* Botones de acción */}
-          {!isInSeenlist() && !isInWatchlist() && (
-            <View style={styles.buttonRow}>
+            <Text style={styles.infoText}>
+              <Text style={styles.infoBold}>Descripción: </Text>
+              {movie.description}
+            </Text>
+
+            <Text style={{ color: "#ccc", marginBottom: 4 }}>
+                      <Text style={{ fontWeight: "bold" }}>Géneros: </Text>
+                      {movie.categories?.join(", ")}
+                    </Text>
+
+            <Text style={{ color: "#ccc", marginBottom: 10 }}>
+                      <Text style={{ fontWeight: "bold" }}>Reparto: </Text>
+                      {movie.cast?.join(", ")}
+                    </Text>
+
+            <View style={styles.row}>
+              <Text style={styles.infoText}>
+                <Text style={styles.infoBold}>Usuarios: </Text>
+                {movie.averageUserRating ?? "N/A"}
+              </Text>
+              <Text style={styles.infoText}>
+                <Text style={styles.infoBold}>Críticos: </Text>
+                {movie.averageCriticRating ?? "N/A"}
+              </Text>
+            </View>
+
+            {!isInSeenlist() && !isInWatchlist() && (
+              <View style={styles.buttonRow}>
+                <TouchableOpacity
+                  style={[styles.button, { backgroundColor: '#333' }]}
+                  onPress={toggleWatchlist}
+                >
+                  <Text style={styles.buttonText}>
+                    Agregar a Ver más tarde
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.button, styles.greenButton]}
+                  onPress={handleAddToSeenlist}
+                >
+                  <Text style={styles.buttonText}>
+                    Agregar a Mi lista
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {isInWatchlist() && !isInSeenlist() && (
               <TouchableOpacity
-                style={[styles.button, { backgroundColor: '#333' }]}
-                onPress={toggleWatchlist}
-              >
-                <Text style={styles.buttonText}>
-                  Agregar a Ver más tarde
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.button, styles.greenButton]}
+                style={[styles.fullButton, { backgroundColor: '#666' }]}
                 onPress={handleAddToSeenlist}
               >
                 <Text style={styles.buttonText}>
-                  Agregar a Mi lista
+                  Mover a Mi lista (ya vista)
                 </Text>
               </TouchableOpacity>
-            </View>
-          )}
+            )}
 
-          {/* Botón para mover de "Ver más tarde" a "Mi lista" */}
-          {isInWatchlist() && !isInSeenlist() && (
-            <TouchableOpacity
-              style={[styles.fullButton, { backgroundColor: '#666' }]}
-              onPress={handleAddToSeenlist}
-            >
-              <Text style={styles.buttonText}>
-                Mover a Mi lista (ya vista)
+            {isInSeenlist() && (
+              <Text style={styles.mutedText}>
+                Ya viste esta película.
               </Text>
-            </TouchableOpacity>
-          )}
+            )}
 
-          {isInSeenlist() && (
-            <Text style={styles.mutedText}>
-              Ya viste esta película.
-            </Text>
-          )}
-
-          {/* Tu comentario */}
-          {hasUserCommented && userComment && (
-            <View style={styles.commentCard}>
-              <Text style={styles.commentTitle}>Tu comentario:</Text>
-              <Text style={styles.commentUser}>
-                {userComment.userId.username} ({userComment.userId.role})
-              </Text>
-              <Text style={styles.starRating}>
-                {"★".repeat(userComment.rating)} ({userComment.rating}/5)
-              </Text>
-              <Text style={styles.commentText}>{userComment.content}</Text>
-            </View>
-          )}
-
-          {/* Otros comentarios */}
-          {comments.map((c, i) => (
-            <View
-              key={i}
-              style={styles.otherComment}
-            >
-              <Text style={styles.commentUser}>
-                {c.userId.username} ({c.userId.role})
-              </Text>
-              <Text style={styles.starRating}>
-                {"★".repeat(c.rating)} ({c.rating}/5)
-              </Text>
-              <Text style={styles.commentText}>{c.content}</Text>
-            </View>
-          ))}
-
-          {/* Formulario de comentario */}
-          {!hasUserCommented && (
-            <View style={styles.commentForm}>
-              <Text style={styles.formLabel}>
-                Deja tu comentario:
-              </Text>
-              <TextInput
-                placeholder="Escribe un comentario"
-                placeholderTextColor="#999"
-                value={commentText}
-                onChangeText={setCommentText}
-                style={styles.input}
-                multiline
-                maxLength={70}
-              />
-
-              <Text style={styles.formLabel}>Puntaje:</Text>
-              <View style={styles.starContainer}>
-                {[1, 2, 3, 4, 5].map((i) => (
-                  <TouchableOpacity key={i} onPress={() => setCommentScore(i)}>
-                    <Text
-                      style={[
-                        styles.star,
-                        i <= (commentScore || 0) && styles.starFilled,
-                      ]}
-                    >
-                      ★
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-                {commentScore > 0 && (
-                  <Text style={styles.scoreText}>
-                    ({commentScore}/5)
-                  </Text>
-                )}
+            {hasUserCommented && userComment && (
+              <View style={styles.commentCard}>
+                <Text style={styles.commentTitle}>Tu comentario:</Text>
+                <Text style={styles.commentUser}>
+                  {userComment.userId.username} ({userComment.userId.role})
+                </Text>
+                <Text style={styles.starRating}>
+                  {"★".repeat(Number(userComment.rating) || 0)} ({userComment.rating}/5)
+                </Text>
+                <Text style={styles.commentText}>{userComment.content}</Text>
               </View>
+            )}
 
-              <TouchableOpacity
-                disabled={
-                  !commentText.trim() || commentScore === null || commentScore === 0
-                }
-                onPress={submitComment}
-                style={[
-                  styles.publishBtn,
-                  (!commentText.trim() || commentScore === null || commentScore === 0) && { opacity: 0.5 },
-                ]}
+            {comments.map((c, i) => (
+              <View
+                key={i}
+                style={styles.otherComment}
               >
-                <Text style={styles.buttonText}>
-                  Publicar comentario
+                <Text style={styles.commentUser}>
+                  {c.userId.username} ({c.userId.role})
                 </Text>
-              </TouchableOpacity>
-            </View>
-          )}
-        </View>
-      )}
-    </ScrollView>
+                <Text style={styles.starRating}>
+                  {"★".repeat(Number(c.rating) || 0)} ({c.rating}/5)
+                </Text>
+                <Text style={styles.commentText}>{c.content}</Text>
+              </View>
+            ))}
+
+            {!hasUserCommented && (
+              <View style={styles.commentForm}>
+                <Text style={styles.formLabel}>
+                  Deja tu comentario:
+                </Text>
+                <TextInput
+                  placeholder="Escribe un comentario"
+                  placeholderTextColor="#999"
+                  value={commentText}
+                  onChangeText={setCommentText}
+                  style={styles.input}
+                  multiline
+                  maxLength={70}
+                />
+
+                <Text style={styles.formLabel}>Puntaje:</Text>
+                <View style={styles.starContainer}>
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <TouchableOpacity key={i} onPress={() => setCommentScore(i)}>
+                      <Text
+                        style={[
+                          styles.star,
+                          i <= (commentScore || 0) && styles.starFilled,
+                        ]}
+                      >
+                        ★
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                  {commentScore > 0 && (
+                    <Text style={styles.scoreText}>
+                      ({commentScore}/5)
+                    </Text>
+                  )}
+                </View>
+
+                <TouchableOpacity
+                  disabled={
+                    !commentText.trim() || commentScore === null || commentScore === 0
+                  }
+                  onPress={submitComment}
+                  style={[
+                    styles.publishBtn,
+                    (!commentText.trim() || commentScore === null || commentScore === 0) && { opacity: 0.5 },
+                  ]}
+                >
+                  <Text style={styles.buttonText}>
+                    Publicar comentario
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        )}
+      </ScrollView>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#181818', // Asegúrate de que el fondo sea consistente
+  },
   container: {
     backgroundColor: '#181818',
     padding: 16,
@@ -521,6 +528,5 @@ const styles = StyleSheet.create({
     borderRadius: 8
   }
 });
-
 
 export default MovieDetailScreen;

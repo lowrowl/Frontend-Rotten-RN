@@ -1,93 +1,112 @@
 import axios from 'axios';
 import config from '../config';
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const API_URL = config.apiUrl;
 
-const api = {
+const api = axios.create({
+  baseURL: API_URL,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// Añadir un interceptor para incluir el token en cada solicitud automáticamente
+api.interceptors.request.use(
+  async (config) => {
+    const token = await AsyncStorage.getItem('token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
+const apiService = {
   // ─── TMDB ────────────────────────────────
-  getPopularMovies: () => axios.get(`${API_URL}/tmdb/popular`),
+  getPopularMovies: () => api.get(`/tmdb/popular`),
 
   searchMovies: (query) =>
-    axios.get(`${API_URL}/tmdb/search?query=${encodeURIComponent(query)}`),
+    api.get(`/tmdb/search?query=${encodeURIComponent(query)}`),
 
   saveMovieFromTmdb: (tmdbId) =>
-    axios.post(`${API_URL}/movies/from-tmdb/${tmdbId}`),
+    api.post(`/movies/from-tmdb/${tmdbId}`),
 
   getMovieByTmdbId: (tmdbId) =>
-    axios.get(`${API_URL}/movies/tmdb/${tmdbId}`),
+    api.get(`/movies/tmdb/${tmdbId}`),
 
   // ─── Comentarios ─────────────────────────
   getCommentsByMovie: (movieId) =>
-    axios.get(`${API_URL}/comments/movie/${movieId}`),
+    api.get(`/comments/movie/${movieId}`),
 
-  createComment: (data, token) =>
-    axios.post(`${API_URL}/comments`, data, {
-      headers: { Authorization: `Bearer ${token}` }
-    }),
+  createComment: (data) => // Token se añade via interceptor
+    api.post(`/comments`, data),
 
   // ─── Auth ────────────────────────────────
   register: (user) =>
-    axios.post(`${API_URL}/users/register`, user),
+    api.post(`/users/register`, user),
 
   login: (credentials) =>
-    axios.post(`${API_URL}/users/login`, credentials),
+    api.post(`/users/login`, credentials),
 
   // ─── Perfil ──────────────────────────────
-  getUserInfo: (token) =>
-    axios.get(`${API_URL}/users/profile`, {
-      headers: { Authorization: `Bearer ${token}` }
-    }),
+  getUserInfo: () => // Token se añade via interceptor
+    api.get(`/users/profile`),
 
-  updateProfile: (data, token) =>
-    axios.patch(`${API_URL}/users/profile`, data, {
-      headers: { Authorization: `Bearer ${token}` }
-    }),
+  updateProfile: (data) => // Token se añade via interceptor
+    api.patch(`/users/profile`, data),
 
-  // ─── Listas del usuario ──────────────────
-  getUserWatchlist: (token) =>
-    axios.get(`${API_URL}/users/watchlist`, {
-      headers: { Authorization: `Bearer ${token}` }
-    }),
+  // ─── Listas del usuario (Watchlist) ──────────────────
+  getUserWatchlist: () => // Token se añade via interceptor
+    api.get(`/users/watchlist`),
 
-  getUserSeenlist: (token) =>
-    axios.get(`${API_URL}/users/seenlist`, {
-      headers: { Authorization: `Bearer ${token}` }
-    }),
-
-  addToWatchlist: (movieId, token) =>
-    axios.post(
-      `${API_URL}/users/watchlist`,
-      { movieId },
-      { headers: { Authorization: `Bearer ${token}` } }
+  addToWatchlist: (movieId) => // Token se añade via interceptor
+    api.post(
+      `/users/watchlist`,
+      { movieId }
     ),
 
-  removeFromWatchlist: (movieId, token) =>
-    axios.post(
-      `${API_URL}/users/watchlist/remove`,
-      { movieId },
-      { headers: { Authorization: `Bearer ${token}` } }
+  removeFromWatchlist: (movieId) => // Token se añade via interceptor (POST para remover)
+    api.post(
+      `/users/watchlist/remove`,
+      { movieId }
     ),
 
-  addToMyList: (movieId, token) =>
-    axios.post(
-      `${API_URL}/users/mylist`,
-      { movieId },
-      { headers: { Authorization: `Bearer ${token}` } }
+  // ─── Listas del usuario (Seenlist - Vistas) ──────────────────
+  getUserSeenlist: () => // Token se añade via interceptor
+    api.get(`/users/seenlist`),
+
+  // **FUNCIÓN CORREGIDA: addToSeenlist**
+  // Ahora apunta a /users/mylist, asumiendo que 'mylist' en el backend
+  // es equivalente a 'seenlist' en el frontend.
+  addToSeenlist: (movieId) => // Token se añade via interceptor
+    api.post(
+      `/users/mylist`, // **CAMBIO AQUÍ: Usamos /users/mylist que existe en el backend**
+      { movieId }
     ),
 
-  moveToMyList: (movieId, token) =>
-    axios.post(
-      `${API_URL}/users/watchlist/to-mylist`,
-      { movieId },
-      { headers: { Authorization: `Bearer ${token}` } }
+  // **FUNCIÓN ELIMINADA: removeFromSeenlist**
+  // Eliminada porque no hay una ruta correspondiente en tu backend ('user.routes.js').
+  // Si necesitas esta funcionalidad, deberás añadirla primero en el backend.
+
+  // ─── Otras Listas (si 'MyList' es diferente de 'Seenlist') ─────
+  addToMyList: (movieId) => // Token se añade via interceptor
+    api.post(
+      `/users/mylist`,
+      { movieId }
     ),
 
-  addToSeenlist: (movieId, token) =>
-    axios.post(
-      `${API_URL}/users/seenlist`,
-      { movieId },
-      { headers: { Authorization: `Bearer ${token}` } }
-    )
+  // Esta función es para "mover" una película, posiblemente de watchlist a mylist/seenlist
+  // Asegúrate de que el endpoint y la lógica coincidan con tu backend
+  moveToMyList: (movieId) => // Token se añade via interceptor
+    api.post(
+      `/users/watchlist/to-mylist`, // Ruta de ejemplo, ajusta si es diferente en tu backend
+      { movieId }
+    ),
+
 };
 
-export default api;
+export default apiService;

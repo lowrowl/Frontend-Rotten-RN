@@ -120,8 +120,12 @@ const ProfileScreen = () => {
       <View style={styles.cardContent}>
         <Text numberOfLines={2} style={styles.title}>{item.title}</Text>
         <View style={styles.ratings}>
-          <Text style={styles.userBadge}>Usuarios: {item.averageUserRating ?? '–'}</Text>
-          <Text style={styles.criticBadge}>Críticos: {item.averageCriticRating ?? '–'}</Text>
+          <View style={styles.userBadge}>
+            <Text style={styles.badgeText}>U: {item.averageUserRating != null ? item.averageUserRating.toFixed(1) : '–'}</Text>
+          </View>
+          <View style={styles.criticBadge}>
+            <Text style={styles.badgeText}>C: {item.averageCriticRating != null ? item.averageCriticRating.toFixed(1) : '–'}</Text>
+          </View>
         </View>
       </View>
     </TouchableOpacity>
@@ -218,7 +222,7 @@ const ProfileScreen = () => {
               renderItem={renderMovie}
               keyExtractor={(item) => item.tmdbId.toString()}
               numColumns={2}
-              contentContainerStyle={{ paddingBottom: 20 }}
+              contentContainerStyle={styles.grid} // Changed to use grid style
             />
           ) : (
             <Text style={styles.empty}>No hay películas en esta lista.</Text>
@@ -327,45 +331,68 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '600'
   },
-  card: {
+  grid: { // Added grid style
+    paddingBottom: 20,
+    gap: 16
+  },
+  card: { // Modified card style
     flex: 1,
     margin: 8,
     backgroundColor: '#232526',
     borderRadius: 18,
-    overflow: 'hidden'
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 3.84,
+      },
+      android: {
+        elevation: 5,
+      },
+    }),
   },
   poster: {
     width: '100%',
-    height: 220
+    height: 220,
+    backgroundColor: '#000' // Added for consistency
   },
   cardContent: {
-    padding: 12
+    padding: 12,
   },
   title: {
     color: '#fff',
     fontWeight: '600',
     fontSize: 16,
-    marginBottom: 6
+    marginBottom: 8, // Changed from 6
+    height: 40, // Added for consistent height
   },
-  ratings: {
+  ratings: { // Modified ratings style
     flexDirection: 'row',
-    justifyContent: 'space-between'
+    justifyContent: 'flex-start',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
   },
-  userBadge: {
+  userBadge: { // Modified userBadge style
     backgroundColor: 'rgba(0, 128, 0, 0.7)',
-    color: '#fff',
+    borderRadius: 10,
     paddingVertical: 4,
     paddingHorizontal: 8,
-    borderRadius: 6,
-    fontSize: 12
   },
-  criticBadge: {
+  criticBadge: { // Modified criticBadge style
     backgroundColor: 'rgba(255, 165, 0, 0.7)',
-    color: '#fff',
+    borderRadius: 10,
     paddingVertical: 4,
     paddingHorizontal: 8,
-    borderRadius: 6,
-    fontSize: 12
+  },
+  badgeText: { // Added badgeText style
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   empty: {
     color: '#fff',
